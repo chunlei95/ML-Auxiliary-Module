@@ -1,0 +1,3 @@
+gan-result.pth: GAN网络无噪声无batchnorm训练100epoch
+gan-result-1.pth: GAN网络添加噪声有batchnorm训练200次
+gan-result-2.path: GAN网络无噪声无batchnorm训练200次

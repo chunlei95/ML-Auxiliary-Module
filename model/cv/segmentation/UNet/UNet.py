@@ -20,10 +20,10 @@ class UNet(nn.Module):
             # 编码器与解码器之间有一个ConvBlock
             ConvBlock(512, 1024, 1024),
             # 解码器部分
-            DecoderBlock(2, 1024, 512, 512),
-            DecoderBlock(2, 512, 512, 256),
-            DecoderBlock(2, 256, 128, 128),
-            DecoderBlock(2, 128, 64, 64),
+            DecoderBlock(1024, 512, 512),
+            DecoderBlock(512, 512, 256),
+            DecoderBlock(256, 128, 128),
+            DecoderBlock(128, 64, 64),
             # 一个Conv 1 * 1
             nn.Conv2d(64, 2, kernel_size=1)
         )
@@ -42,8 +42,12 @@ class ConvBlock(nn.Module):
 
     def __init__(self, in_channels, mid_channels, out_channels):
         super(ConvBlock, self).__init__()
-        conv_relu_list = [nn.Conv2d(in_channels=in_channels, out_channels=mid_channels, kernel_size=3), nn.ReLU(),
-                          nn.Conv2d(in_channels=mid_channels, out_channels=out_channels, kernel_size=3), nn.ReLU()]
+        conv_relu_list = [nn.Conv2d(in_channels=in_channels, out_channels=mid_channels, kernel_size=3),
+                          nn.BatchNorm2d(mid_channels),
+                          nn.ReLU(inplace=True),
+                          nn.Conv2d(in_channels=mid_channels, out_channels=out_channels, kernel_size=3),
+                          nn.BatchNorm2d(out_channels),
+                          nn.ReLU(inplace=True)]
         self.conv_relu = nn.Sequential(*conv_relu_list)
 
     def forward(self, x):
@@ -65,15 +69,24 @@ class DownSampling(nn.Module):
 
 
 class UpSampling(nn.Module):
-    """上采样，用在解码器的ConvBlock前面，使用双线性插值法
+    """上采样，用在解码器的ConvBlock前面，使用转置卷积，同时通道数减半，
 
-    :param scale_factor: 上采样时使用的尺度因子
+    C_out = out_channels
+    H_out = (H_in - 1) * stride - 2 * padding + dilation * (kernel_size - 1) + output_padding + 1
+    W_out = (W_in - 1) * stride - 2 * padding + dilation * (kernel_size - 1) + output_padding + 1
+
+    :param in_channels: 转置卷积的输入通道数
+    :param out_channels: 转置卷积的输出通道数
+    :param kernel_size: 转置卷积的卷积核大小，默认为2
+    :param stride: 转置卷积的步幅，默认为2
     """
 
-    def __init__(self, scale_factor):
+    def __init__(self, in_channels, out_channels, kernel_size=2, stride=2, dilation=1, padding=0, output_padding=0):
         super(UpSampling, self).__init__()
         # self.up_sample = nn.Upsample(scale_factor=scale_factor, mode='bilinear')
-        self.up_sample = nn.ConvTranspose2d()
+        # stride=2, kernel_size=2相当于宽高翻倍
+        self.up_sample = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride,
+                                            dilation=dilation, padding=padding, output_padding=output_padding)
 
     def forward(self, x):
         return self.up_sample(x)
@@ -120,15 +133,14 @@ class ConcatLayer(nn.Module):
 class DecoderBlock(nn.Module):
     """解码器中的层次块，每个层次块都是UpSampling -> Concat -> ConvBlock
 
-    :param scale_factor: 采样时使用的尺度因子
     :param in_channels: 层次块的输入通道数
     :param mid_channels: 层次块中间一层卷积的通道数
     :param out_channels: 层次块输出层的通道数
     """
 
-    def __init__(self, scale_factor, in_channels, mid_channels, out_channels):
+    def __init__(self, in_channels, mid_channels, out_channels):
         super(DecoderBlock, self).__init__()
-        self.up_sample = UpSampling(scale_factor)
+        self.up_sample = UpSampling(in_channels, out_channels)
         self.conv_block = ConvBlock(in_channels, mid_channels, out_channels)
 
     def forward(self, x, skip_x):
